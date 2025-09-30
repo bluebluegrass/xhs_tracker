@@ -29,6 +29,7 @@ jobs:
 
       # （可选）恢复上次运行的去重文件
       - name: Restore last seen file (artifact)
+        if: ${{ github.run_number > 1 }}
         uses: dawidd6/action-download-artifact@v6
         with:
           workflow: xhs.yml
