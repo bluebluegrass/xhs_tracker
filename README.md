@@ -12,10 +12,20 @@ A lightweight GitHub Actions workflow that keeps an eye on Xiaohongshu (小红�
 Create the following repository secrets so the workflow can authenticate and know what to look for:
 - `KEYWORDS` – Comma-separated or newline-separated list of search terms.
 - `TG_BOT_TOKEN` – Token for your Telegram bot (from @BotFather).
-- `TG_CHAT_ID` – Chat or channel ID where notifications should be delivered.
-- `XHS_COOKIE` – Required for most accounts; provide the `name=value; name2=value2` cookie string from a logged-in Xiaohongshu browser session.
+- `TG_CHAT_ID` – Chat or channel ID where notifications should be delivered (include the `-100` prefix for channels/supergroups).
+- `XHS_COOKIE` – Required; copy the `name=value; name2=value2` cookie string from a logged-in Xiaohongshu browser session (see instructions below).
+- `USER_AGENT` – The exact desktop browser UA used when capturing the cookie (e.g. `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)...`).
 
-The workflow also sets `HEADLESS=1` for Playwright by default. Adjust the environment block in `.github/workflows/xhs.yml` if you need to override any values.
+The workflow also sets `HEADLESS=1` for Playwright by default. Adjust the environment block in `.github/workflows/xhs.yml` if you need to override any values or add custom headers.
+
+### Capturing `XHS_COOKIE` and `USER_AGENT`
+1. Open https://www.xiaohongshu.com/ in a normal browser window and sign in.
+2. Open Developer Tools → Network tab (enable “Preserve log”).
+3. Visit a search page such as `https://www.xiaohongshu.com/search_result?keyword=...` and wait for it to load.
+4. In the request list, locate a successful call whose URL contains `sns/web/v1/search/notes`.
+5. Copy the entire `Cookie` header from the Request Headers section and store it as the `XHS_COOKIE` secret.
+6. Copy the `User-Agent` header from the same request (or from DevTools → Network → top right context menu) and store it as the `USER_AGENT` secret.
+7. Cookies expire frequently; repeat this process when the workflow starts returning 400 responses from the Xiaohongshu API.
 
 ## Running Locally
 You can execute the watcher script on your machine before pushing changes:
@@ -29,6 +39,7 @@ export KEYWORDS="term1, term2"
 export TG_BOT_TOKEN="123456:ABC"
 export TG_CHAT_ID="-100987654321"
 export XHS_COOKIE="name=value; other=123"
+export USER_AGENT="Mozilla/5.0 ..."
 python xhs_watch.py
 ```
 
@@ -38,5 +49,6 @@ The script stores seen post IDs in `xhs_seen.json`. Delete that file if you want
 - Update the schedule or add additional triggers in `.github/workflows/xhs.yml` for finer control.
 - Extend `xhs_watch.py` with richer filtering (e.g., author names, tags) before sending messages to Telegram.
 - Tune `max_posts_per_keyword` or scrolling logic in `search_posts` if you want a deeper result set.
+- If no posts appear, check the workflow logs: 400 responses from `sns/web/v1/search/notes` usually mean the cookie expired or the UA/header set does not match the captured session.
 
 Push changes to GitHub and the workflow will monitor Xiaohongshu automatically on the configured schedule.
