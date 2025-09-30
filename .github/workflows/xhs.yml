@@ -22,10 +22,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Install Playwright browsers and required system deps (Python version)
-      - name: Install Playwright browsers and deps
+      # Install Playwright browser binaries
+      - name: Install Playwright Chromium
         run: |
-          python -m playwright install --with-deps chromium
+          python -m playwright install chromium
 
       # （可选）恢复上次运行的去重文件
       - name: Restore last seen file (artifact)
@@ -66,5 +66,4 @@ jobs:
           path: ./xhs_seen.json
           if-no-files-found: warn
           retention-days: 90
-
 
