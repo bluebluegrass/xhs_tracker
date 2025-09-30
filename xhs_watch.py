@@ -7,16 +7,11 @@ from typing import List, Optional, Set
 import requests
 import urllib.parse
 import textwrap
-from datetime import datetime, timedelta, timezone
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from requests import HTTPError
 
 
 SEEN_FILE = Path("xhs_seen.json")
-
-
-
-MAX_POST_AGE = timedelta(days=14)
 
 
 def load_keywords() -> List[str]:
@@ -83,47 +78,11 @@ def build_post_message(post: dict) -> str:
     author = (post.get('author') or '').strip()
     if author:
         lines.append(f"Author: {author}")
-    published_at = parse_timestamp(post.get('published_at'))
-    if published_at:
-        lines.append(published_at.astimezone(timezone.utc).strftime('发布时间（UTC）：%Y-%m-%d %H:%M:%S'))
     url = post.get('url')
     if url:
         lines.append(url)
         lines.append('📲 在 Telegram 手机版打开后，点击链接可跳转至小红书 App 查看完整内容。')
     return '\n'.join(lines)
-
-
-def parse_timestamp(raw: Optional[str]) -> Optional[datetime]:
-    if not raw:
-        return None
-    raw = str(raw).strip()
-    if not raw:
-        return None
-
-    # Numeric epoch (seconds or milliseconds)
-    try:
-        value = float(raw)
-    except ValueError:
-        value = None
-
-    if value is not None:
-        if value > 1e12:  # milliseconds
-            value /= 1000
-        if value > 0:
-            try:
-                return datetime.fromtimestamp(value, tz=timezone.utc)
-            except Exception:
-                pass
-
-    try:
-        return datetime.fromisoformat(raw.replace('Z', '+00:00'))
-    except Exception:
-        return None
-
-
-def is_recent_enough(timestamp: datetime) -> bool:
-    now = datetime.now(timezone.utc)
-    return now - timestamp <= MAX_POST_AGE
 
 
 def parse_cookie_string(raw_cookie: str) -> List[dict]:
@@ -147,54 +106,6 @@ def parse_cookie_string(raw_cookie: str) -> List[dict]:
             'sameSite': 'Lax',
         })
     return cookies
-
-
-def fetch_note_timestamp(page, note_id: str) -> Optional[datetime]:
-    detail_url = f"https://edith.xiaohongshu.com/api/sns/web/v1/note/detail?id={note_id}"
-    headers = {
-        "Accept": "application/json, text/plain, */*",
-        "Referer": f"https://www.xiaohongshu.com/explore/{note_id}",
-        "X-Requested-With": "XMLHttpRequest",
-    }
-    try:
-        response = page.context.request.get(detail_url, headers=headers, timeout=25000)
-    except Exception as exc:
-        print(f"Failed to fetch detail for {note_id}: {exc}", file=sys.stderr)
-        return None
-
-    if not response.ok:
-        print(
-            f"Detail request for {note_id} failed: status={response.status}, url={detail_url}",
-            file=sys.stderr,
-        )
-        try:
-            preview = response.text()[:200]
-            if preview:
-                print(f"Detail body preview: {preview}", file=sys.stderr)
-        except Exception:
-            pass
-        return None
-
-    try:
-        payload = response.json()
-    except Exception as exc:
-        print(f"Invalid JSON for detail {note_id}: {exc}", file=sys.stderr)
-        return None
-
-    note_info = (payload.get('data') or {}).get('note_info') or {}
-    raw_time = (
-        note_info.get('time')
-        or note_info.get('time_note')
-        or note_info.get('publish_time')
-        or note_info.get('published_time')
-    )
-    timestamp = parse_timestamp(raw_time)
-    if timestamp is None:
-        print(
-            f"Detail response missing usable timestamp for {note_id}: raw={raw_time!r}",
-            file=sys.stderr,
-        )
-    return timestamp
 
 
 def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless: bool = True, max_posts_per_keyword: int = 20) -> List[dict]:
@@ -284,19 +195,6 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                 note_url = f"{base_url}/explore/{note_id}" if note_id else None
                                 if not note_id or note_id in seen_ids or not note_url:
                                     continue
-                                published_ts = fetch_note_timestamp(page, note_id)
-                                if published_ts is None:
-                                    print(
-                                        f"Skipping post {note_id} (missing detail timestamp)",
-                                        file=sys.stderr,
-                                    )
-                                    continue
-                                if not is_recent_enough(published_ts):
-                                    print(
-                                        f"Skipping post {note_id} (stale): {published_ts.isoformat()}",
-                                        file=sys.stderr,
-                                    )
-                                    continue
                                 results.append({
                                     'id': note_id,
                                     'title': title or f"XHS post {note_id}",
@@ -307,7 +205,6 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                         or ((note_card.get('image_list') or [{}])[0] or {}).get('url')
                                     ),
                                     'author': ((note_card.get('user') or {}).get('nickname') or ''),
-                                    'published_at': published_ts.isoformat(),
                                 })
                                 seen_ids.add(note_id)
                                 print(f"Queued post {note_id} from API for keyword '{keyword}'")
@@ -328,11 +225,18 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                         post_id = href.split('/')[-1].split('?')[0]
                         if not post_id or post_id in seen_ids:
                             continue
-                        print(
-                            f"Skipping anchor-only post {post_id} – missing timestamp",
-                            file=sys.stderr,
-                        )
+                        title = title or f"XHS post {post_id}"
+                        results.append({
+                            'id': post_id,
+                            'title': title,
+                            'url': f"{base_url}{href}",
+                            'description': '',
+                            'cover_url': None,
+                            'author': '',
+                        })
+                        seen_ids.add(post_id)
                         count_for_keyword += 1
+                        print(f"Queued post {post_id} for keyword '{keyword}'")
                         if count_for_keyword >= max_posts_per_keyword:
                             break
                 except PlaywrightTimeoutError:
