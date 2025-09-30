@@ -236,11 +236,25 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                 note_url = f"{base_url}/explore/{note_id}" if note_id else None
                                 if not note_id or note_id in seen_ids or not note_url:
                                     continue
-                                published_raw = item.get('time') or note_card.get('time')
+                                published_raw = (
+                                    item.get('time')
+                                    or note_card.get('time')
+                                    or note_card.get('time_note')
+                                    or note_card.get('published_time')
+                                    or item.get('note_time')
+                                )
                                 published_ts = parse_timestamp(published_raw)
                                 if published_ts is None:
                                     print(
-                                        f"Skipping post {note_id} (invalid timestamp): {published_raw}",
+                                        "Failed to parse timestamp for post {}: raw={!r}, keys={}".format(
+                                            note_id,
+                                            published_raw,
+                                            sorted(note_card.keys()),
+                                        ),
+                                        file=sys.stderr,
+                                    )
+                                    print(
+                                        "Item keys: {}".format(sorted(item.keys())),
                                         file=sys.stderr,
                                     )
                                     continue
