@@ -27,6 +27,18 @@ The workflow also sets `HEADLESS=1` for Playwright by default. Adjust the enviro
 6. Copy the `User-Agent` header from the same request (or from DevTools → Network → top right context menu) and store it as the `USER_AGENT` secret.
 7. Cookies expire frequently; repeat this process when the workflow starts returning 400 responses from the Xiaohongshu API.
 
+## Getting Started for Your Own Channel
+If you fork this repository and want your own Telegram feed:
+
+1. Create a Telegram bot via @BotFather; copy the token.
+2. Create a channel (or group), invite the bot, make it admin, then obtain the chat ID (e.g. forward a message to @userinfobot).
+3. Capture `XHS_COOKIE` and `USER_AGENT` as described above and add them plus your bot credentials to the fork's repository secrets.
+4. Update `KEYWORDS` with your search phrases and tweak `.github/workflows/xhs.yml` if you want a different schedule.
+5. Enable GitHub Actions on the fork, run `xhs.yml` manually once, and confirm Telegram receives updates.
+
+### Prefer Not to Host It Yourself?
+Subscribe to the public Telegram channel `@xhs_tracker` to follow the shared feed maintained by this project.
+
 ## Running Locally
 You can execute the watcher script on your machine before pushing changes:
 
