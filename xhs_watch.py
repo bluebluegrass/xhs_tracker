@@ -149,6 +149,48 @@ def parse_cookie_string(raw_cookie: str) -> List[dict]:
     return cookies
 
 
+def fetch_note_timestamp(page, note_id: str) -> Optional[datetime]:
+    detail_url = f"https://edith.xiaohongshu.com/api/sns/web/v1/note/detail?id={note_id}"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Referer": f"https://www.xiaohongshu.com/explore/{note_id}",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    try:
+        response = page.context.request.get(detail_url, headers=headers, timeout=25000)
+    except Exception as exc:
+        print(f"Failed to fetch detail for {note_id}: {exc}", file=sys.stderr)
+        return None
+
+    if not response.ok:
+        print(
+            f"Detail request for {note_id} failed: status={response.status}, body={response.text()[:200]}",
+            file=sys.stderr,
+        )
+        return None
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        print(f"Invalid JSON for detail {note_id}: {exc}", file=sys.stderr)
+        return None
+
+    note_info = (payload.get('data') or {}).get('note_info') or {}
+    raw_time = (
+        note_info.get('time')
+        or note_info.get('time_note')
+        or note_info.get('publish_time')
+        or note_info.get('published_time')
+    )
+    timestamp = parse_timestamp(raw_time)
+    if timestamp is None:
+        print(
+            f"Detail response missing usable timestamp for {note_id}: raw={raw_time!r}",
+            file=sys.stderr,
+        )
+    return timestamp
+
+
 def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless: bool = True, max_posts_per_keyword: int = 20) -> List[dict]:
     results: List[dict] = []
     seen_ids: Set[str] = set()
@@ -236,25 +278,10 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                 note_url = f"{base_url}/explore/{note_id}" if note_id else None
                                 if not note_id or note_id in seen_ids or not note_url:
                                     continue
-                                published_raw = (
-                                    item.get('time')
-                                    or note_card.get('time')
-                                    or note_card.get('time_note')
-                                    or note_card.get('published_time')
-                                    or item.get('note_time')
-                                )
-                                published_ts = parse_timestamp(published_raw)
+                                published_ts = fetch_note_timestamp(page, note_id)
                                 if published_ts is None:
                                     print(
-                                        "Failed to parse timestamp for post {}: raw={!r}, keys={}".format(
-                                            note_id,
-                                            published_raw,
-                                            sorted(note_card.keys()),
-                                        ),
-                                        file=sys.stderr,
-                                    )
-                                    print(
-                                        "Item keys: {}".format(sorted(item.keys())),
+                                        f"Skipping post {note_id} (missing detail timestamp)",
                                         file=sys.stderr,
                                     )
                                     continue
