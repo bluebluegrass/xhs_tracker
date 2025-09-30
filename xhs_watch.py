@@ -164,9 +164,15 @@ def fetch_note_timestamp(page, note_id: str) -> Optional[datetime]:
 
     if not response.ok:
         print(
-            f"Detail request for {note_id} failed: status={response.status}, body={response.text()[:200]}",
+            f"Detail request for {note_id} failed: status={response.status}, url={detail_url}",
             file=sys.stderr,
         )
+        try:
+            preview = response.text()[:200]
+            if preview:
+                print(f"Detail body preview: {preview}", file=sys.stderr)
+        except Exception:
+            pass
         return None
 
     try:
