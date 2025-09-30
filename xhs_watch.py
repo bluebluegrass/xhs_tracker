@@ -106,17 +106,18 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                         'keyword': keyword,
                         'source': 'web_search_result_notes',
                     })
-                    search_url = f"{base_url}/search_result?{search_params}"
-                    page.goto(search_url, wait_until='networkidle', timeout=45000)
                     api_response = None
+                    search_url = f"{base_url}/search_result?{search_params}"
                     try:
-                        api_response = page.wait_for_response(
+                        with page.expect_response(
                             lambda resp: (
                                 resp.status == 200
                                 and 'sns/web/v1/search/notes' in resp.url
                             ),
                             timeout=25000,
-                        )
+                        ) as resp_info:
+                            page.goto(search_url, wait_until='networkidle', timeout=45000)
+                        api_response = resp_info.value
                         print(
                             f"Captured API response for keyword '{keyword}': {api_response.url}"
                         )
@@ -125,6 +126,7 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                             f"Search API response timeout for keyword '{keyword}'",
                             file=sys.stderr,
                         )
+                        page.goto(search_url, wait_until='networkidle', timeout=45000)
                     try:
                         page.wait_for_function(
                             "document.querySelectorAll(\"a[href^='/explore/']\").length > 0",
