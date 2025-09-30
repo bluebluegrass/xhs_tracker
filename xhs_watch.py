@@ -2,9 +2,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Set
+from typing import List, Optional, Set
 
 import requests
+import urllib.parse
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 
 SEEN_FILE = Path("xhs_seen.json")
@@ -41,16 +43,101 @@ def send_telegram_message(bot_token: str, chat_id: str, text: str) -> None:
     resp.raise_for_status()
 
 
-def fake_search_posts(keywords: List[str]) -> List[dict]:
-    # Placeholder: replace with real Xiaohongshu scraping via Playwright later
-    demo = []
-    for kw in keywords:
-        demo.append({
-            "id": f"demo-{kw}",
-            "title": f"Demo result for {kw}",
-            "url": f"https://www.xiaohongshu.com/search/result?keyword={kw}",
+def parse_cookie_string(raw_cookie: str) -> List[dict]:
+    cookies: List[dict] = []
+    for part in raw_cookie.split(';'):
+        part = part.strip()
+        if not part or '=' not in part:
+            continue
+        name, value = part.split('=', 1)
+        name = name.strip()
+        value = value.strip()
+        if not name:
+            continue
+        cookies.append({
+            'name': name,
+            'value': value,
+            'domain': '.xiaohongshu.com',
+            'path': '/',
+            'httpOnly': False,
+            'secure': True,
+            'sameSite': 'Lax',
         })
-    return demo
+    return cookies
+
+
+def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless: bool = True, max_posts_per_keyword: int = 20) -> List[dict]:
+    results: List[dict] = []
+    seen_ids: Set[str] = set()
+    cookie = (cookie or '').strip()
+    user_agent = os.getenv(
+        'USER_AGENT',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    )
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=headless)
+        context = browser.new_context(
+            user_agent=user_agent,
+            viewport={'width': 1280, 'height': 720},
+        )
+        try:
+            if cookie:
+                parsed = parse_cookie_string(cookie)
+                if parsed:
+                    context.add_cookies(parsed)
+
+            base_url = 'https://www.xiaohongshu.com'
+            for keyword in keywords:
+                page = context.new_page()
+                try:
+                    encoded_keyword = urllib.parse.quote(keyword)
+                    search_url = f"{base_url}/search/result?keyword={encoded_keyword}"
+                    page.goto(search_url, wait_until='networkidle', timeout=45000)
+                    try:
+                        page.wait_for_selector("a[href^='/explore/']", timeout=20000)
+                    except PlaywrightTimeoutError:
+                        pass
+
+                    anchors = page.eval_on_selector_all(
+                        "a[href^='/explore/']",
+                        """(elements) => elements.map((el) => ({
+                            href: el.getAttribute('href'),
+                            title: (el.innerText || '').trim()
+                        }))""",
+                    )
+
+                    count_for_keyword = 0
+                    for entry in anchors:
+                        href = entry.get('href')
+                        title = entry.get('title')
+                        if not href or not href.startswith('/explore/'):
+                            continue
+                        post_id = href.split('/')[-1].split('?')[0]
+                        if not post_id or post_id in seen_ids:
+                            continue
+                        title = title or f"XHS post {post_id}"
+                        results.append({
+                            'id': post_id,
+                            'title': title,
+                            'url': f"{base_url}{href}",
+                        })
+                        seen_ids.add(post_id)
+                        count_for_keyword += 1
+                        if count_for_keyword >= max_posts_per_keyword:
+                            break
+                except PlaywrightTimeoutError:
+                    print(f"Timed out while fetching results for keyword: {keyword}", file=sys.stderr)
+                except Exception as exc:
+                    print(f"Failed to fetch keyword '{keyword}': {exc}", file=sys.stderr)
+                finally:
+                    page.close()
+        finally:
+            context.close()
+            browser.close()
+
+    return results
 
 
 def main() -> int:
@@ -67,8 +154,15 @@ def main() -> int:
     seen = load_seen()
     new_seen = set(seen)
 
-    # TODO: replace with real search using Playwright and XHS_COOKIE if needed
-    posts = fake_search_posts(keywords)
+    headless_env = os.getenv('HEADLESS', '1').strip().lower()
+    headless = headless_env not in {'0', 'false', 'no'}
+    xhs_cookie = os.getenv('XHS_COOKIE', '')
+
+    posts = search_posts(
+        keywords,
+        cookie=xhs_cookie,
+        headless=headless,
+    )
 
     # If first run (no seen), only send up to 10 recent posts
     is_first_run = len(seen) == 0
