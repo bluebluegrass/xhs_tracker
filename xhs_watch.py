@@ -102,13 +102,23 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                 page = context.new_page()
                 try:
                     print(f"Fetching keyword '{keyword}'")
-                    encoded_keyword = urllib.parse.quote(keyword)
-                    search_url = f"{base_url}/search/result?keyword={encoded_keyword}"
+                    search_params = urllib.parse.urlencode({
+                        'keyword': keyword,
+                        'source': 'web_search_result_notes',
+                    })
+                    search_url = f"{base_url}/search_result?{search_params}"
                     page.goto(search_url, wait_until='networkidle', timeout=45000)
                     try:
-                        page.wait_for_selector("a[href^='/explore/']", timeout=20000)
+                        page.wait_for_function(
+                            "document.querySelectorAll(\"a[href^='/explore/']\").length > 0",
+                            timeout=20000,
+                        )
                     except PlaywrightTimeoutError:
-                        pass
+                        print(
+                            f"No explore anchors detected for keyword '{keyword}' within timeout",
+                            file=sys.stderr,
+                        )
+                        page.wait_for_timeout(2000)
 
                     anchors = page.eval_on_selector_all(
                         "a[href^='/explore/']",
