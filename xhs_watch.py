@@ -321,6 +321,7 @@ def main() -> int:
         posts = posts[:10]
         print(f"First run detected; truncated posts to {len(posts)}")
 
+    sent_any = False
     for post in posts:
         pid = post["id"]
         if pid in seen:
@@ -345,6 +346,18 @@ def main() -> int:
                 print(f"Failed to send TG message for {pid}: {e}", file=sys.stderr)
                 continue
         new_seen.add(pid)
+        sent_any = True
+
+    if not sent_any:
+        print("No new posts matched criteria; notifying Telegram")
+        try:
+            send_telegram_message(
+                tg_token,
+                tg_chat_id,
+                "No new Xiaohongshu posts matched your filters in the last run.",
+            )
+        except Exception as e:
+            print(f"Failed to send empty-result notification: {e}", file=sys.stderr)
 
     save_seen(new_seen)
     return 0
