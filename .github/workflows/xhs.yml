@@ -2,7 +2,7 @@ name: XHS Watcher
 
 on:
   schedule:
-    - cron: "0 * * * *"   # 每小时，按需改
+    - cron: "0 */6 * * *" # 每 6 小时运行一次
   workflow_dispatch: {}
 
 jobs:
@@ -66,4 +66,3 @@ jobs:
           path: ./xhs_seen.json
           if-no-files-found: warn
           retention-days: 90
-
