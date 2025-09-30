@@ -5,7 +5,7 @@ A lightweight GitHub Actions workflow that keeps an eye on Xiaohongshu (小红�
 ## How It Works
 - Runs hourly by default via `.github/workflows/xhs.yml`; you can tweak the cron expression to suit your needs.
 - Installs Python 3.11, the project requirements from `requirements.txt`, and Playwright Chromium so the scraper can run in Actions.
-- Executes `xhs_watch.py`, which reads keywords from environment variables, checks each result, and sends new matches to Telegram.
+- Executes `xhs_watch.py`, which reads keywords from environment variables, checks each result, and sends new matches (with cover image + summary when available) to Telegram.
 - Persists the list of seen post IDs between runs (`xhs_seen.json`) using the Actions artifacts API so duplicates are not re-sent.
 
 ## Required Secrets
@@ -50,5 +50,6 @@ The script stores seen post IDs in `xhs_seen.json`. Delete that file if you want
 - Extend `xhs_watch.py` with richer filtering (e.g., author names, tags) before sending messages to Telegram.
 - Tune `max_posts_per_keyword` or scrolling logic in `search_posts` if you want a deeper result set.
 - If no posts appear, check the workflow logs: 400 responses from `sns/web/v1/search/notes` usually mean the cookie expired or the UA/header set does not match the captured session.
+- Telegram posts include the note title, a short summary, and the cover image when Xiaohongshu returns one; tweak `build_post_message` if you want a different caption format.
 
 Push changes to GitHub and the workflow will monitor Xiaohongshu automatically on the configured schedule.

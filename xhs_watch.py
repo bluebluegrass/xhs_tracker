@@ -6,6 +6,7 @@ from typing import List, Optional, Set
 
 import requests
 import urllib.parse
+import textwrap
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from requests import HTTPError
 
@@ -35,21 +36,52 @@ def save_seen(seen: Set[str]) -> None:
     SEEN_FILE.write_text(json.dumps(sorted(seen), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def send_telegram_message(bot_token: str, chat_id: str, text: str) -> None:
+def send_telegram_message(bot_token: str, chat_id: str, text: str, *, photo_url: Optional[str] = None) -> None:
     if not bot_token or not chat_id:
         print("Telegram token or chat id missing; skipping send")
         return
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
-    resp = requests.post(url, json=payload, timeout=20)
+
+    base_url = f"https://api.telegram.org/bot{bot_token}"
+    if photo_url:
+        payload = {"chat_id": chat_id, "photo": photo_url, "caption": text}
+        resp = requests.post(f"{base_url}/sendPhoto", data=payload, timeout=20)
+    else:
+        payload = {"chat_id": chat_id, "text": text}
+        resp = requests.post(f"{base_url}/sendMessage", json=payload, timeout=20)
+
     try:
         resp.raise_for_status()
     except HTTPError as exc:
         detail = resp.text
-        print(f"Telegram API error: status={resp.status_code}, body={detail}", file=sys.stderr)
+        print(
+            f"Telegram API error (photo={bool(photo_url)}): status={resp.status_code}, body={detail}",
+            file=sys.stderr,
+        )
         raise exc
 
-    print(f"Telegram message sent to {chat_id}: {text.splitlines()[0] if text else '<empty>'}")
+    action = 'photo' if photo_url else 'message'
+    preview = text.splitlines()[0] if text else '<empty>'
+    print(f"Telegram {action} sent to {chat_id}: {preview}")
+
+
+def build_post_message(post: dict) -> str:
+    lines = []
+    title = (post.get('title') or '').strip()
+    if title:
+        lines.append(title)
+    description = (post.get('description') or '').strip()
+    if description:
+        compact = ' '.join(description.split())
+        snippet = textwrap.shorten(compact, width=220, placeholder='…')
+        if snippet:
+            lines.append(snippet)
+    author = (post.get('author') or '').strip()
+    if author:
+        lines.append(f"Author: {author}")
+    url = post.get('url')
+    if url:
+        lines.append(url)
+    return '\n'.join(lines)
 
 
 def parse_cookie_string(raw_cookie: str) -> List[dict]:
@@ -166,6 +198,12 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                     'id': note_id,
                                     'title': title or f"XHS post {note_id}",
                                     'url': note_url,
+                                    'description': (note_card.get('desc') or '').strip(),
+                                    'cover_url': (
+                                        (note_card.get('cover') or {}).get('url')
+                                        or ((note_card.get('image_list') or [{}])[0] or {}).get('url')
+                                    ),
+                                    'author': ((note_card.get('user') or {}).get('nickname') or ''),
                                 })
                                 seen_ids.add(note_id)
                                 print(f"Queued post {note_id} from API for keyword '{keyword}'")
@@ -191,6 +229,9 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                             'id': post_id,
                             'title': title,
                             'url': f"{base_url}{href}",
+                            'description': '',
+                            'cover_url': None,
+                            'author': '',
                         })
                         seen_ids.add(post_id)
                         count_for_keyword += 1
@@ -253,13 +294,26 @@ def main() -> int:
         pid = post["id"]
         if pid in seen:
             continue
-        message = f"{post['title']}\n{post['url']}"
+        message = build_post_message(post)
+        photo_url = post.get('cover_url')
         print(f"Attempting to send post {pid}: {post['url']}")
         try:
-            send_telegram_message(tg_token, tg_chat_id, message)
-            new_seen.add(pid)
+            send_telegram_message(tg_token, tg_chat_id, message, photo_url=photo_url)
         except Exception as e:
-            print(f"Failed to send TG message for {pid}: {e}", file=sys.stderr)
+            if photo_url:
+                print(
+                    f"Photo send failed for {pid}, retrying without image: {e}",
+                    file=sys.stderr,
+                )
+                try:
+                    send_telegram_message(tg_token, tg_chat_id, message, photo_url=None)
+                except Exception as inner:
+                    print(f"Failed to send TG message for {pid}: {inner}", file=sys.stderr)
+                    continue
+            else:
+                print(f"Failed to send TG message for {pid}: {e}", file=sys.stderr)
+                continue
+        new_seen.add(pid)
 
     save_seen(new_seen)
     return 0
