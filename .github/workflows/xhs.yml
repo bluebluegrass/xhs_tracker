@@ -22,9 +22,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ✅ 这一步会自动安装浏览器和系统依赖（等同于 install / install-deps）
-      - name: Setup Playwright
-        uses: microsoft/playwright-github-action@v1
+      # Install Playwright browsers and required system deps (Python version)
+      - name: Install Playwright browsers and deps
+        run: |
+          python -m playwright install --with-deps chromium
 
       # （可选）恢复上次运行的去重文件
       - name: Restore last seen file (artifact)
