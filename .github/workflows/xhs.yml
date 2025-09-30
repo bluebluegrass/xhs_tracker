@@ -41,6 +41,11 @@ jobs:
         run: |
           test -f xhs_seen.json || echo "[]" > xhs_seen.json
 
+      - name: List workspace for debugging
+        run: |
+          pwd
+          ls -la
+
       - name: Run watcher (single pass)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -57,7 +62,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: xhs-seen
-          path: xhs_seen.json
+          path: ./xhs_seen.json
+          if-no-files-found: warn
           retention-days: 90
 
 
