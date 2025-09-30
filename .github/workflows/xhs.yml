@@ -1,0 +1,40 @@
+name: XHS Watcher
+
+on:
+  schedule:
+    # 任选其一，或留多条（UTC 时间）
+    # - cron: "0 * * * *"     # 每小时
+    # - cron: "0 */2 * * *" # 每2小时
+     - cron: "0 */5 * * *" # 每5小时
+  workflow_dispatch: {}      # 手动触发
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          pip install -r requirements.txt
+
+      - name: Install Playwright browsers & deps
+        run: |
+          python -m playwright install chromium
+          python -m playwright install-deps
+
+      - name: Run watcher (single pass)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+          KEYWORDS:     ${{ secrets.KEYWORDS }}   # 建议也放到 Secrets
+          XHS_COOKIE:   ${{ secrets.XHS_COOKIE }} # 可选：遇到风控再配
+          HEADLESS:     "1"
+        run: |
+          python xhs_watch.py
