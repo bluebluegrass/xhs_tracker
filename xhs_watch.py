@@ -86,6 +86,23 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit_code = 0
+    try:
+        exit_code = main()
+    except Exception as e:
+        print(f"Unhandled error: {e}", file=sys.stderr)
+        try:
+            if not SEEN_FILE.exists():
+                save_seen(set())
+        except Exception:
+            pass
+        exit_code = 0
+    else:
+        try:
+            if not SEEN_FILE.exists():
+                save_seen(set())
+        except Exception:
+            pass
+    raise SystemExit(exit_code)
 
 

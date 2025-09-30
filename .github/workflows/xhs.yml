@@ -37,6 +37,10 @@ jobs:
           path: .
         continue-on-error: true
 
+      - name: Ensure seen file exists
+        run: |
+          test -f xhs_seen.json || echo "[]" > xhs_seen.json
+
       - name: Run watcher (single pass)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -44,7 +48,9 @@ jobs:
           KEYWORDS:     ${{ secrets.KEYWORDS }}
           XHS_COOKIE:   ${{ secrets.XHS_COOKIE }}
           HEADLESS:     "1"
-        run: python xhs_watch.py
+        run: |
+          set -e
+          python xhs_watch.py || echo "Script failed but proceeding to upload artifact"
 
       - name: Upload seen file for next runs
         if: always()
