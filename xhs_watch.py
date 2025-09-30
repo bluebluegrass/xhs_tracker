@@ -96,22 +96,32 @@ def build_post_message(post: dict) -> str:
 def parse_timestamp(raw: Optional[str]) -> Optional[datetime]:
     if not raw:
         return None
-    raw = raw.strip()
+    raw = str(raw).strip()
     if not raw:
         return None
+
+    # Numeric epoch (seconds or milliseconds)
     try:
-        return datetime.fromtimestamp(int(raw), tz=timezone.utc)
+        value = float(raw)
+    except ValueError:
+        value = None
+
+    if value is not None:
+        if value > 1e12:  # milliseconds
+            value /= 1000
+        if value > 0:
+            try:
+                return datetime.fromtimestamp(value, tz=timezone.utc)
+            except Exception:
+                pass
+
+    try:
+        return datetime.fromisoformat(raw.replace('Z', '+00:00'))
     except Exception:
-        try:
-            return datetime.fromisoformat(raw.replace('Z', '+00:00'))
-        except Exception:
-            return None
+        return None
 
 
-def is_recent_enough(raw: Optional[str]) -> bool:
-    timestamp = parse_timestamp(raw)
-    if timestamp is None:
-        return True
+def is_recent_enough(timestamp: datetime) -> bool:
     now = datetime.now(timezone.utc)
     return now - timestamp <= MAX_POST_AGE
 
@@ -226,10 +236,18 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                 note_url = f"{base_url}/explore/{note_id}" if note_id else None
                                 if not note_id or note_id in seen_ids or not note_url:
                                     continue
-                                published_at = item.get('time') or note_card.get('time')
-                                if not is_recent_enough(published_at):
+                                published_raw = item.get('time') or note_card.get('time')
+                                published_ts = parse_timestamp(published_raw)
+                                if published_ts is None:
                                     print(
-                                        f"Skipping post {note_id} (stale): {published_at}"
+                                        f"Skipping post {note_id} (invalid timestamp): {published_raw}",
+                                        file=sys.stderr,
+                                    )
+                                    continue
+                                if not is_recent_enough(published_ts):
+                                    print(
+                                        f"Skipping post {note_id} (stale): {published_ts.isoformat()}",
+                                        file=sys.stderr,
                                     )
                                     continue
                                 results.append({
@@ -242,7 +260,7 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                         or ((note_card.get('image_list') or [{}])[0] or {}).get('url')
                                     ),
                                     'author': ((note_card.get('user') or {}).get('nickname') or ''),
-                                    'published_at': published_at,
+                                    'published_at': published_ts.isoformat(),
                                 })
                                 seen_ids.add(note_id)
                                 print(f"Queued post {note_id} from API for keyword '{keyword}'")
