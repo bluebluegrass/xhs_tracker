@@ -85,10 +85,11 @@ def build_post_message(post: dict) -> str:
         lines.append(f"Author: {author}")
     published_at = parse_timestamp(post.get('published_at'))
     if published_at:
-        lines.append(f"Published: {published_at.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        lines.append(published_at.astimezone(timezone.utc).strftime('发布时间（UTC）：%Y-%m-%d %H:%M:%S'))
     url = post.get('url')
     if url:
         lines.append(url)
+        lines.append('📲 在 Telegram 手机版打开后，点击链接可跳转至小红书 App 查看完整内容。')
     return '\n'.join(lines)
 
 
