@@ -108,6 +108,23 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                     })
                     search_url = f"{base_url}/search_result?{search_params}"
                     page.goto(search_url, wait_until='networkidle', timeout=45000)
+                    api_response = None
+                    try:
+                        api_response = page.wait_for_response(
+                            lambda resp: (
+                                resp.status == 200
+                                and 'sns/web/v1/search/notes' in resp.url
+                            ),
+                            timeout=25000,
+                        )
+                        print(
+                            f"Captured API response for keyword '{keyword}': {api_response.url}"
+                        )
+                    except PlaywrightTimeoutError:
+                        print(
+                            f"Search API response timeout for keyword '{keyword}'",
+                            file=sys.stderr,
+                        )
                     try:
                         page.wait_for_function(
                             "document.querySelectorAll(\"a[href^='/explore/']\").length > 0",
@@ -128,6 +145,35 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                         }))""",
                     )
                     print(f"Found {len(anchors)} anchors for keyword '{keyword}'")
+
+                    if api_response is not None:
+                        try:
+                            payload = api_response.json()
+                            items = payload.get('data', {}).get('items', [])
+                            print(
+                                f"API returned {len(items)} items for keyword '{keyword}'"
+                            )
+                            for item in items:
+                                note_id = item.get('id') or item.get('note_id')
+                                note_card = item.get('note_card') or {}
+                                title = note_card.get('display_title') or note_card.get('title')
+                                note_url = f"{base_url}/explore/{note_id}" if note_id else None
+                                if not note_id or note_id in seen_ids or not note_url:
+                                    continue
+                                results.append({
+                                    'id': note_id,
+                                    'title': title or f"XHS post {note_id}",
+                                    'url': note_url,
+                                })
+                                seen_ids.add(note_id)
+                                print(f"Queued post {note_id} from API for keyword '{keyword}'")
+                                if len(results) >= max_posts_per_keyword * len(keywords):
+                                    break
+                        except Exception as exc:
+                            print(
+                                f"Failed to parse API payload for keyword '{keyword}': {exc}",
+                                file=sys.stderr,
+                            )
 
                     count_for_keyword = 0
                     for entry in anchors:
