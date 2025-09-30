@@ -7,11 +7,16 @@ from typing import List, Optional, Set
 import requests
 import urllib.parse
 import textwrap
+from datetime import datetime, timedelta, timezone
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from requests import HTTPError
 
 
 SEEN_FILE = Path("xhs_seen.json")
+
+
+
+MAX_POST_AGE = timedelta(days=14)
 
 
 def load_keywords() -> List[str]:
@@ -78,10 +83,36 @@ def build_post_message(post: dict) -> str:
     author = (post.get('author') or '').strip()
     if author:
         lines.append(f"Author: {author}")
+    published_at = parse_timestamp(post.get('published_at'))
+    if published_at:
+        lines.append(f"Published: {published_at.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     url = post.get('url')
     if url:
         lines.append(url)
     return '\n'.join(lines)
+
+
+def parse_timestamp(raw: Optional[str]) -> Optional[datetime]:
+    if not raw:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromtimestamp(int(raw), tz=timezone.utc)
+    except Exception:
+        try:
+            return datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        except Exception:
+            return None
+
+
+def is_recent_enough(raw: Optional[str]) -> bool:
+    timestamp = parse_timestamp(raw)
+    if timestamp is None:
+        return True
+    now = datetime.now(timezone.utc)
+    return now - timestamp <= MAX_POST_AGE
 
 
 def parse_cookie_string(raw_cookie: str) -> List[dict]:
@@ -194,6 +225,12 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                 note_url = f"{base_url}/explore/{note_id}" if note_id else None
                                 if not note_id or note_id in seen_ids or not note_url:
                                     continue
+                                published_at = item.get('time') or note_card.get('time')
+                                if not is_recent_enough(published_at):
+                                    print(
+                                        f"Skipping post {note_id} (stale): {published_at}"
+                                    )
+                                    continue
                                 results.append({
                                     'id': note_id,
                                     'title': title or f"XHS post {note_id}",
@@ -204,6 +241,7 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                                         or ((note_card.get('image_list') or [{}])[0] or {}).get('url')
                                     ),
                                     'author': ((note_card.get('user') or {}).get('nickname') or ''),
+                                    'published_at': published_at,
                                 })
                                 seen_ids.add(note_id)
                                 print(f"Queued post {note_id} from API for keyword '{keyword}'")
@@ -224,18 +262,11 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                         post_id = href.split('/')[-1].split('?')[0]
                         if not post_id or post_id in seen_ids:
                             continue
-                        title = title or f"XHS post {post_id}"
-                        results.append({
-                            'id': post_id,
-                            'title': title,
-                            'url': f"{base_url}{href}",
-                            'description': '',
-                            'cover_url': None,
-                            'author': '',
-                        })
-                        seen_ids.add(post_id)
+                        print(
+                            f"Skipping anchor-only post {post_id} – missing timestamp",
+                            file=sys.stderr,
+                        )
                         count_for_keyword += 1
-                        print(f"Queued post {post_id} for keyword '{keyword}'")
                         if count_for_keyword >= max_posts_per_keyword:
                             break
                 except PlaywrightTimeoutError:
