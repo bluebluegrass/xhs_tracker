@@ -70,6 +70,11 @@ def main() -> int:
     # TODO: replace with real search using Playwright and XHS_COOKIE if needed
     posts = fake_search_posts(keywords)
 
+    # If first run (no seen), only send up to 10 recent posts
+    is_first_run = len(seen) == 0
+    if is_first_run:
+        posts = posts[:10]
+
     for post in posts:
         pid = post["id"]
         if pid in seen:
