@@ -2,7 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 import requests
 import urllib.parse
@@ -62,6 +62,66 @@ def send_telegram_message(bot_token: str, chat_id: str, text: str, *, photo_url:
     action = 'photo' if photo_url else 'message'
     preview = text.splitlines()[0] if text else '<empty>'
     print(f"Telegram {action} sent to {chat_id}: {preview}")
+
+
+def coerce_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def ensure_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def extract_post_details(note_card: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    note_card = note_card or {}
+
+    user_info = note_card.get("user") or {}
+    stats_info = note_card.get("stats") or {}
+    interact_info = note_card.get("interact_info") or {}
+    tag_list: Sequence[Dict[str, Any]] = note_card.get("tag_list") or []
+    image_list: Sequence[Dict[str, Any]] = note_card.get("image_list") or []
+
+    cover_info = note_card.get("cover") or {}
+    video_info = note_card.get("video") or {}
+
+    # prefer cover url, fallback to first image
+    primary_cover = ensure_text(cover_info.get("url"))
+    if not primary_cover and image_list:
+        primary_cover = ensure_text((image_list[0] or {}).get("url"))
+
+    tags = [ensure_text(tag.get("name")) for tag in tag_list if ensure_text(tag.get("name"))]
+    images = [ensure_text(entry.get("url")) for entry in image_list if ensure_text(entry.get("url"))]
+
+    publish_time = note_card.get("time") or note_card.get("display_time")
+
+    return {
+        "title": ensure_text(note_card.get("display_title") or note_card.get("title")),
+        "description": ensure_text(note_card.get("desc")),
+        "cover_url": primary_cover or None,
+        "author": ensure_text(user_info.get("nickname")),
+        "author_id": ensure_text(user_info.get("user_id")) or None,
+        "author_avatar": ensure_text(user_info.get("avatar")) or None,
+        "liked_count": coerce_int(stats_info.get("liked_count") or interact_info.get("liked_count")),
+        "collected_count": coerce_int(stats_info.get("collected_count") or interact_info.get("collected_count")),
+        "comment_count": coerce_int(stats_info.get("comment_count") or interact_info.get("comment_count")),
+        "share_count": coerce_int(stats_info.get("share_count") or interact_info.get("share_count")),
+        "publish_time": ensure_text(publish_time) or None,
+        "tag_list": tags,
+        "image_urls": images,
+        "media_type": ensure_text(note_card.get("type")) or None,
+        "video_url": ensure_text(video_info.get("url")) or None,
+        "video_cover": ensure_text(video_info.get("cover")) or None,
+        "video_duration": coerce_int(video_info.get("duration")),
+    }
 
 
 def build_post_message(post: dict) -> str:
@@ -191,21 +251,18 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                             for item in items:
                                 note_id = item.get('id') or item.get('note_id')
                                 note_card = item.get('note_card') or {}
-                                title = note_card.get('display_title') or note_card.get('title')
+                                details = extract_post_details(note_card)
+                                title = details.pop('title', None)
                                 note_url = f"{base_url}/explore/{note_id}" if note_id else None
                                 if not note_id or note_id in seen_ids or not note_url:
                                     continue
-                                results.append({
+                                post_data = {
                                     'id': note_id,
-                                    'title': title or f"XHS post {note_id}",
+                                    'title': (title or f"XHS post {note_id}").strip(),
                                     'url': note_url,
-                                    'description': (note_card.get('desc') or '').strip(),
-                                    'cover_url': (
-                                        (note_card.get('cover') or {}).get('url')
-                                        or ((note_card.get('image_list') or [{}])[0] or {}).get('url')
-                                    ),
-                                    'author': ((note_card.get('user') or {}).get('nickname') or ''),
-                                })
+                                }
+                                post_data.update(details)
+                                results.append(post_data)
                                 seen_ids.add(note_id)
                                 print(f"Queued post {note_id} from API for keyword '{keyword}'")
                                 if len(results) >= max_posts_per_keyword * len(keywords):
@@ -233,6 +290,19 @@ def search_posts(keywords: List[str], *, cookie: Optional[str] = None, headless:
                             'description': '',
                             'cover_url': None,
                             'author': '',
+                            'author_id': None,
+                            'author_avatar': None,
+                            'liked_count': None,
+                            'collected_count': None,
+                            'comment_count': None,
+                            'share_count': None,
+                            'publish_time': None,
+                            'tag_list': [],
+                            'image_urls': [],
+                            'media_type': None,
+                            'video_url': None,
+                            'video_cover': None,
+                            'video_duration': None,
                         })
                         seen_ids.add(post_id)
                         count_for_keyword += 1
